@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Miami Buyer True-Cost Comparator</title>
+<style>
+:root{--ink:#0E4D5C;--bg:#F7F6F1;--card:#FFFFFF;--muted:#5B6B70;--line:#DDE3E5;--good:#17704F;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#D8ECEF;--bg:#0F1C1F;--card:#162529;--muted:#9FB3B8;--line:#2A3F45;--good:#6FD1A9;color-scheme:dark}}
+:root[data-theme="dark"]{--ink:#D8ECEF;--bg:#0F1C1F;--card:#162529;--muted:#9FB3B8;--line:#2A3F45;--good:#6FD1A9;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:0 0 14px}
+.note{color:var(--muted);font-size:13px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle}
+th{font-weight:600;font-size:13px;color:var(--muted)}
+td:first-child,th:first-child{text-align:left;width:34%;color:var(--muted)}
+input{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);font:inherit}
+.best{color:var(--good);font-weight:700}
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px}
+.settings label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+p{margin:0 0 8px}
+</style>
+</head>
+<body>
+<main>
+<h1>Miami Buyer True-Cost Comparator</h1>
+<p class="note">Compare up to three homes by what they cost you to own. Example figures are filled in. Replace them with numbers from each listing, the tax bill, your insurance quotes, and your lender.</p>
+
+<div class="card"><h2>Settings</h2><div class="settings">
+<div><label for="stress">Rate stress test (added percentage points)</label><input id="stress" type="number" step="0.25" value="1.5"></div>
+<div><label for="horizon">Comparison period (years)</label><input id="horizon" type="number" step="1" min="1" max="30" value="5"></div>
+</div></div>
+
+<div class="card scroll"><h2>Homes</h2><table id="inputs"></table></div>
+<div class="card scroll"><h2>Results</h2><table id="results"></table></div>
+
+<div class="card note">
+<p><strong>How the cost of owning is built.</strong> It adds interest paid, property tax, insurance, HOA or condo fees, closing costs, the special assessment, and repairs over the comparison period. It leaves out principal paydown and appreciation. Principal builds equity rather than costing you money, and appreciation depends on the market. Use the total to compare homes side by side, then weigh location and appreciation yourself.</p>
+<p>Property tax is a percentage of price per year, so divide your annual tax bill by the price. Check whether a homestead exemption applies if you will live in the home. Florida's homestead exemption requires owning and living in the home on January 1, and applications are due by March 1. This tool produces estimates for comparison. It is not a quote, and it is not legal, tax, or insurance advice.</p>
+</div>
+</main>
+
+<script>
+const FIELDS = [
+  {k:'name',label:'Home name',type:'text'},
+  {k:'price',label:'Purchase price ($)',step:1000},
+  {k:'down',label:'Down payment (%)',step:0.5},
+  {k:'rate',label:'Interest rate (%)',step:0.125},
+  {k:'term',label:'Loan term (years)',step:1},
+  {k:'tax',label:'Property tax (% of price per year)',step:0.05},
+  {k:'ins',label:'Homeowners insurance ($ per year)',step:100},
+  {k:'flood',label:'Flood insurance ($ per year)',step:100},
+  {k:'hoa',label:'HOA or condo fees ($ per month)',step:25},
+  {k:'special',label:'Planned special assessment ($, one time)',step:500},
+  {k:'closing',label:'Closing costs (% of price)',step:0.25},
+  {k:'repairs',label:'Repairs and reserve ($, one time)',step:500}
+];
+const SAMPLE = [
+  {name:'Home A',price:450000,down:20,rate:6.5,term:30,tax:1.8,ins:4200,flood:0,hoa:650,special:0,closing:2,repairs:5000},
+  {name:'Home B',price:520000,down:20,rate:6.5,term:30,tax:1.8,ins:6800,flood:2400,hoa:0,special:0,closing:2,repairs:0},
+  {name:'Home C',price:480000,down:25,rate:6.25,term:30,tax:1.8,ins:5000,flood:0,hoa:900,special:3000,closing:2,repairs:2000}
+];
+let homes = SAMPLE.map(h => ({...h}));
+let settings = {stress: 1.5, horizon: 5};
+
+function num(v){ const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }
+function money(n){ return '$' + Math.round(n).toLocaleString('en-US'); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function calc(h){
+  const price = num(h.price), down = num(h.down)/100, rate = num(h.rate)/100;
+  const n = (num(h.term) || 30) * 12;
+  const loan = price * (1 - down);
+  const r = rate / 12;
+  const pmt = r === 0 ? loan / n : loan * r / (1 - Math.pow(1 + r, -n));
+  const rs = (num(h.rate) + num(settings.stress)) / 100 / 12;
+  const pmtStress = rs === 0 ? loan / n : loan * rs / (1 - Math.pow(1 + rs, -n));
+  const taxM = price * num(h.tax) / 100 / 12;
+  const insM = (num(h.ins) + num(h.flood)) / 12;
+  const hoaM = num(h.hoa);
+  const total = pmt + taxM + insM + hoaM;
+  const stressTotal = pmtStress + taxM + insM + hoaM;
+  const closingCost = price * num(h.closing) / 100;
+  const cashClose = price * down + closingCost + num(h.repairs) + num(h.special);
+  const m = Math.min(Math.max(0, num(settings.horizon)) * 12, n);
+  const bal = r === 0 ? loan - pmt * m : loan * Math.pow(1 + r, m) - pmt * (Math.pow(1 + r, m) - 1) / r;
+  const interest = pmt * m - (loan - bal);
+  const costPeriod = interest + (taxM + insM + hoaM) * m + closingCost + num(h.special) + num(h.repairs);
+  return {loan, pmt, taxM, insM, hoaM, total, stressTotal, cashClose, costPeriod};
+}
+
+function renderInputs(){
+  let html = '<tr><th>Field</th>' + homes.map((h, i) => '<th>Home ' + (i + 1) + '</th>').join('') + '</tr>';
+  FIELDS.forEach(f => {
+    html += '<tr><td>' + f.label + '</td>' + homes.map((h, i) => {
+      const v = esc(h[f.k] === undefined ? '' : h[f.k]);
+      const type = f.type === 'text' ? 'text' : 'number';
+      const step = f.step ? ' step="' + f.step + '"' : '';
+      return '<td><input type="' + type + '"' + step + ' data-i="' + i + '" data-k="' + f.k + '" value="' + v + '"></td>';
+    }).join('') + '</tr>';
+  });
+  document.getElementById('inputs').innerHTML = html;
+}
+
+function renderResults(){
+  const res = homes.map(calc);
+  let best = 0;
+  res.forEach((r, i) => { if (r.costPeriod < res[best].costPeriod) best = i; });
+  const names = homes.map((h, i) => esc(h.name || ('Home ' + (i + 1))));
+  const rows = [
+    ['Loan amount', r => money(r.loan)],
+    ['Monthly principal and interest', r => money(r.pmt)],
+    ['Monthly property tax', r => money(r.taxM)],
+    ['Monthly insurance', r => money(r.insM)],
+    ['Monthly HOA or condo', r => money(r.hoaM)],
+    ['Total monthly cost', r => money(r.total)],
+    ['Total monthly if the rate rises (stress test)', r => money(r.stressTotal)],
+    ['Cash needed at closing', r => money(r.cashClose)],
+    ['Cost of owning over ' + settings.horizon + ' years', r => money(r.costPeriod), true]
+  ];
+  let html = '<tr><th>Result</th>' + names.map(n => '<th>' + n + '</th>').join('') + '</tr>';
+  rows.forEach(row => {
+    html += '<tr><td>' + row[0] + '</td>' + res.map((r, i) => {
+      const cls = row[2] && i === best ? ' class="best"' : '';
+      return '<td' + cls + '>' + row[1](r) + '</td>';
+    }).join('') + '</tr>';
+  });
+  html += '<tr><td>Lowest cost of owning</td><td class="best" colspan="' + homes.length + '">' + names[best] + '</td></tr>';
+  document.getElementById('results').innerHTML = html;
+}
+
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.k !== undefined) {
+    homes[+t.dataset.i][t.dataset.k] = t.value;
+  } else if (t.id === 'stress') {
+    settings.stress = num(t.value);
+  } else if (t.id === 'horizon') {
+    settings.horizon = num(t.value);
+  } else {
+    return;
+  }
+  renderResults();
+});
+
+renderInputs();
+renderResults();
+</script>
+</body>
+</html>
